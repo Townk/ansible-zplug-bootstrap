@@ -1,0 +1,107 @@
+# MIT License
+# 
+# Copyright (c) 2019 Thiago Alves
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+---
+# Make sure that we can use Homebrew on Mac if user doesn't preffer local
+# install.
+- name: Configure environment variables
+  block:
+  - name: Force ZPlug to local installation on non-MacOSX distributions
+    set_fact: zplug_preffer_local_install=True
+    when: ansible_distribution != 'MacOSX'
+
+  - name: Configure ZPLUG_HOME to system's ZPlug
+    set_fact: zplug_home_dir="/usr/local/opt/zplug" 
+    when: not zplug_preffer_local_install
+  - name: Configure ZPLUG_HOME to XDG default
+    set_fact: zplug_home_dir="{{ lookup('env', 'XDG_PACKAGE_HOME') }}/zplug" 
+    when: zplug_home_dir == "XDG_PACKAGE_HOME" and zplug_preffer_local_install
+  - name: Configure ZPLUG_HOME to default value
+    set_fact: zplug_home_dir="{{ lookup('env', 'HOME') }}/.zplug" 
+    when: zplug_home_dir == "/zplug" and zplug_preffer_local_install
+
+  - name: Configure ZPLUG_CACHE_DIR to XDG default
+    set_fact: zplug_cache_dir="{{ lookup('env', 'XDG_CACHE_HOME') }}/zplug" 
+    when: zplug_cache_dir == "XDG_CACHE_HOME"
+  - name: Configure ZPLUG_CACHE_DIR to default value
+    set_fact: zplug_cache_dir="{{ lookup('env', 'HOME') }}/.zplug/cache" 
+    when: zplug_cache_dir == "/zplug"
+
+  - name: Configure ZPLUG_REPOS to XDG default
+    set_fact: zplug_repos_dir="{{ lookup('env', 'XDG_DATA_HOME') }}/zplug/repos" 
+    when: zplug_repos_dir == "XDG_DATA_HOME"
+  - name: Configure ZPLUG_REPOS to default value
+    set_fact: zplug_repos_dir="{{ lookup('env', 'HOME') }}/.zplug/repos" 
+    when: zplug_repos_dir == "/zplug/repos"
+
+  - name: Configure ZPLUG_LOADFILE to XDG default
+    set_fact: zplug_packages_location="{{ lookup('env', 'XDG_DATA_HOME') }}/zplug/packages.zsh" 
+    when: zplug_packages_location == "XDG_DATA_HOME"
+  - name: Configure ZPLUG_LOADFILE to default value
+    set_fact: zplug_packages_location="{{ lookup('env', 'HOME') }}/.zplug/packages.zsh" 
+    when: zplug_packages_location == "/zplug/packages.zsh"
+
+  - name: Configure ZSH local plugin location
+    set_fact: zplug_plugin_location="{{ lookup('env', 'XDG_DATA_HOME') }}/zplug/zplug-bootstrap.zsh" 
+    when: zplug_plugin_location == "XDG_DATA_HOME"
+  - name: Configure ZSH local plugin location to default value
+    set_fact: zplug_plugin_location="{{ lookup('env', 'HOME') }}/.zplug/zplug-bootstrap.zsh" 
+    when: zplug_plugin_location == "/zplug/zplug-bootstrap.zsh"
+
+- name: Check if ZPlug is already installed
+  stat:
+    path: "{{ zplug_home_dir }}/init.zsh"  
+  register: zplug_init_script
+
+- name: Install ZPlug
+  block:
+    - name: Installing via package manager
+      package:
+        name: zplug
+        state: present
+      register: zplug_install_from_pm_result
+      when: not zplug_preffer_local_install
+
+    - name: Create ZPLUG_HOME directory
+      file:
+        path: "{{ zplug_home_dir }}"
+        state: directory
+      when: zplug_preffer_local_install or ("rc" in zplug_install_from_pm_result and zplug_install_from_pm_result.rc != 0)
+
+    # The local installation is done the way the ZPlug maintainers recommend
+    - name: Installing ZPlug on user's HOME
+      shell: |
+        export ZPLUG_HOME={{ zplug_home_dir }}
+        curl -sL --proto-redir -all,https https://raw.githubusercontent.com/zplug/installer/master/installer.zsh | zsh
+      args:
+        warn: no
+      when: zplug_preffer_local_install or ("rc" in zplug_install_from_pm_result and zplug_install_from_pm_result.rc != 0)
+  when: not zplug_init_script.stat.exists
+
+- name: Updating plugins list
+  template:
+    src: packages.zsh.j2
+    dest: "{{ zplug_packages_location }}"
+
+- name: Updating ZPlug's plugin for ZSH
+  template:
+    src: zplug-bootstrap.zsh.j2
+    dest: "{{ zplug_plugin_location }}"
